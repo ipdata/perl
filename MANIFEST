@@ -1,0 +1,9 @@
+Changes
+lib/Net/IPData.pm
+Makefile.PL
+MANIFEST
+t/01-constructor.t
+t/02-validation.t
+t/03-mock-responses.t
+t/04-live.t
+examples/basic.pl
