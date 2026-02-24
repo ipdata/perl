@@ -1,0 +1,32 @@
+name: Release to CPAN
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.38'
+          install-modules-with: cpanm
+          install-modules: CPAN::Uploader
+
+      - name: Build and test
+        run: |
+          perl Makefile.PL
+          make
+          make test
+
+      - name: Build distribution
+        run: make dist
+
+      - name: Upload to CPAN
+        env:
+          CPAN_USERNAME: ${{ secrets.CPAN_USERNAME }}
+          CPAN_PASSWORD: ${{ secrets.CPAN_PASSWORD }}
+        run: cpan-upload -u "$CPAN_USERNAME" -p "$CPAN_PASSWORD" Net-IPData-*.tar.gz
