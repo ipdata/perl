@@ -1,6 +1,6 @@
 Revision history for Net-IPData
 
-Unreleased
+1.1.0  2026-11-03
     - The API server's TLS certificate is now verified with every HTTP::Tiny
       version: verify_SSL => 1 is passed explicitly (HTTP::Tiny before 0.083
       verified only when asked to, and 0.083+ can be told not to through an
