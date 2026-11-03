@@ -10,7 +10,7 @@ WriteMakefile(
     LICENSE          => 'perl_5',
     MIN_PERL_VERSION => '5.010001',
     PREREQ_PM        => {
-        'HTTP::Tiny'   => '0.034',    # core since 5.14, need SSL support
+        'HTTP::Tiny'   => '0.049',    # core since 5.14; 0.049+ for fork/thread-safe keep-alive
         'JSON::PP'     => '2.27',     # core since 5.14
         'Carp'         => '0',
         'Scalar::Util' => '0',

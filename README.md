@@ -9,6 +9,7 @@ Perl client for the [ipdata.co](https://ipdata.co/) IP geolocation and threat in
 - **Rich data** -- geolocation, ASN, company, carrier, currency, timezone, and language info
 - **EU endpoint** -- route requests through EU-only servers for GDPR compliance
 - **Zero non-core dependencies** -- uses only `HTTP::Tiny` and `JSON::PP` (core since Perl 5.14)
+- **Connection reuse** -- one persistent HTTPS connection per client object (HTTP/1.1 keep-alive), so only the first request pays the TLS handshake
 - **Production ready** -- input validation, structured error handling, configurable timeouts
 
 ## Installation
@@ -169,6 +170,29 @@ Error messages include the HTTP status code and the API's error message:
 | 429 | Rate limit exceeded |
 | 599 | Network/connection failure |
 
+## Connection reuse
+
+A `Net::IPData` object keeps one persistent HTTPS connection (HTTP/1.1 keep-alive) for as long as it lives. Create one client per process (or one per API key or endpoint), keep it, and reuse it for every lookup: each new client pays a fresh TLS handshake. HTTP/2 is not available with `HTTP::Tiny`, so the saving is the TLS handshake, not multiplexing.
+
+```perl
+my $ipdata = Net::IPData->new(api_key => 'YOUR_API_KEY');   # one TLS handshake...
+
+for my $ip (@ips) {
+    my $result = $ipdata->lookup($ip);                       # ...reused by every lookup
+}
+```
+
+The reuse is `HTTP::Tiny`'s own (`keep_alive => 1`, now explicit and configurable): a connection the server has already closed is detected and replaced transparently, a `GET` on a socket that died silently is retried once by `HTTP::Tiny` itself, and `bulk` (a non-idempotent `POST`) gets the same single retry from this module when the failure happened at the socket level before any response arrived (`HTTP::Tiny` status 599 with *Socket closed*, *Unexpected end of stream* or *Connection reset*). A request that received an HTTP status is never retried.
+
+A `Net::IPData` object is not shared between threads: use one per thread. It is fork-safe: `HTTP::Tiny` 0.049 and later never reuses a socket inherited from another process or thread, so a forked child opens its own connection on its first request. There is nothing to close explicitly; the connection is shut down when the object is destroyed, so letting it go out of scope (or `undef $ipdata`) at shutdown is all the cleanup needed.
+
+Pass `keep_alive => 0` to open a new connection per request, or supply your own user agent with `ua => $obj` (any object with `HTTP::Tiny`-compatible `get`/`post` methods returning `{status, content, headers, success}`), for example a pre-configured `HTTP::Tiny` or a mock in tests:
+
+```perl
+my $ua     = HTTP::Tiny->new(verify_SSL => 1, keep_alive => 1, timeout => 10);
+my $ipdata = Net::IPData->new(api_key => 'YOUR_API_KEY', ua => $ua);
+```
+
 ## Constructor Options
 
 | Parameter | Type | Default | Description |
@@ -177,6 +201,9 @@ Error messages include the HTTP status code and the API's error message:
 | `eu` | bool | `0` | Use the EU endpoint (`eu-api.ipdata.co`) |
 | `base_url` | string | `https://api.ipdata.co` | Custom base URL (overrides `eu`) |
 | `timeout` | int | `30` | HTTP timeout in seconds |
+| `keep_alive` | bool | `1` | Keep the HTTPS connection open between requests (HTTP/1.1 keep-alive); `0` opens a new connection per request |
+| `keep_alive_timeout` | int | *unset* | Idle timeout in seconds, forwarded to `HTTP::Tiny->new` only when set; stock `HTTP::Tiny` (up to 0.086) has no such setting and ignores it |
+| `ua` | object | new `HTTP::Tiny` | Your own user agent: any object with `HTTP::Tiny`-compatible `get`/`post` returning `{status, content, headers, success}` |
 
 ## Methods
 
@@ -234,7 +261,7 @@ A full lookup returns a hashref with this shape:
 ## Requirements
 
 - Perl 5.10.1 or later
-- Core modules only: [HTTP::Tiny](https://metacpan.org/pod/HTTP::Tiny), [JSON::PP](https://metacpan.org/pod/JSON::PP), [Carp](https://metacpan.org/pod/Carp), [Scalar::Util](https://metacpan.org/pod/Scalar::Util)
+- Core modules only: [HTTP::Tiny](https://metacpan.org/pod/HTTP::Tiny) 0.049 or later (ships with Perl 5.22+; older Perls install it from CPAN), [JSON::PP](https://metacpan.org/pod/JSON::PP), [Carp](https://metacpan.org/pod/Carp), [Scalar::Util](https://metacpan.org/pod/Scalar::Util)
 - Recommended: [IO::Socket::SSL](https://metacpan.org/pod/IO::Socket::SSL) and [Net::SSLeay](https://metacpan.org/pod/Net::SSLeay) for HTTPS support
 
 ## Testing
