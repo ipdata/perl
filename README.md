@@ -186,7 +186,7 @@ for my $ip (@ips) {
 }
 ```
 
-The reuse is `HTTP::Tiny`'s own (`keep_alive => 1`, now explicit and configurable): a connection the server has already closed is detected and replaced transparently, a `GET` on a socket that died silently is retried once by `HTTP::Tiny` itself, and `bulk` (a non-idempotent `POST`) gets the same single retry from this module when the failure happened at the socket level before any response arrived (`HTTP::Tiny` status 599 with *Socket closed*, *Unexpected end of stream* or *Connection reset*). A request that received an HTTP status is never retried.
+The reuse is `HTTP::Tiny`'s own (`keep_alive => 1`, now explicit and configurable): a connection the server has already closed is detected and replaced transparently, a `GET` on a socket that died silently is retried once by `HTTP::Tiny` itself, and `bulk` (a non-idempotent `POST`) gets the same single retry from this module when the failure happened at the socket level before any response arrived (`HTTP::Tiny` status 599 with *Socket closed*, *Unexpected end of stream* or *Connection reset*). A request that received an HTTP status is never retried. With `HTTP::Tiny` 0.092 or later, `keep_alive_timeout => 60` additionally stops reusing a connection that has been idle for a minute, before the server (which keeps idle connections for roughly two minutes) can drop it silently.
 
 A `Net::IPData` object is not shared between threads: use one per thread. It is fork-safe: `HTTP::Tiny` 0.049 and later never reuses a socket inherited from another process or thread, so a forked child opens its own connection on its first request. There is nothing to close explicitly; the connection is shut down when the object is destroyed, so letting it go out of scope (or `undef $ipdata`) at shutdown is all the cleanup needed.
 
@@ -206,7 +206,7 @@ my $ipdata = Net::IPData->new(api_key => 'YOUR_API_KEY', ua => $ua);
 | `base_url` | string | `https://api.ipdata.co` | Custom base URL (overrides `eu`) |
 | `timeout` | int | `30` | HTTP timeout in seconds |
 | `keep_alive` | bool | `1` | Keep the HTTPS connection open between requests (HTTP/1.1 keep-alive); `0` opens a new connection per request |
-| `keep_alive_timeout` | int | *unset* | Idle timeout in seconds, forwarded to `HTTP::Tiny->new` only when set; stock `HTTP::Tiny` (up to 0.086) has no such setting and ignores it |
+| `keep_alive_timeout` | int | *unset* | Seconds a kept-alive connection may sit idle before the next request opens a fresh one; honoured by `HTTP::Tiny` 0.092+ (older versions ignore it) and forwarded only when set; `60` suits api.ipdata.co |
 | `ua` | object | new `HTTP::Tiny` | Your own user agent: any object with `HTTP::Tiny`-compatible `get`/`post` returning `{status, content, headers, success}` |
 
 ## Methods

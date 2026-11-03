@@ -66,8 +66,9 @@ sub new {
             agent           => "Net-IPData-Perl/$VERSION",
             timeout         => $timeout,
             keep_alive      => $keep_alive,
-            # HTTP::Tiny ignores constructor keys it does not know, so the
-            # idle timeout is only forwarded when the caller asked for one.
+            # Forwarded only when the caller asked for one, so HTTP::Tiny's
+            # own default (no idle limit) applies otherwise; HTTP::Tiny
+            # before 0.092 has no such setting and ignores the key.
             (defined $keep_alive_timeout
                 ? (keep_alive_timeout => $keep_alive_timeout)
                 : ()),
@@ -76,6 +77,13 @@ sub new {
                 'Content-Type' => 'application/json',
             },
         );
+        # HTTP::Tiny 0.092 and later document keep_alive_timeout as a
+        # constructor attribute, but their constructor (checked up to 0.096)
+        # never copies the argument into the object, so set the attribute
+        # directly where it exists.
+        if (defined $keep_alive_timeout && eval { HTTP::Tiny->VERSION('0.092') }) {
+            $ua->{keep_alive_timeout} = $keep_alive_timeout;
+        }
     }
 
     return bless {
@@ -356,7 +364,7 @@ has no non-core dependencies.
         base_url           => '...',            # custom base URL (overrides eu)
         timeout            => 30,               # HTTP timeout in seconds (default: 30)
         keep_alive         => 1,                # reuse the HTTPS connection (default: 1)
-        keep_alive_timeout => 60,               # idle timeout in seconds (default: unset)
+        keep_alive_timeout => 60,               # idle timeout in seconds (default: none)
         ua                 => $user_agent,      # your own HTTP::Tiny-compatible object
     );
 
@@ -370,12 +378,13 @@ every request. Not applied when C<ua> is supplied.
 
 =item keep_alive_timeout
 
-Idle timeout in seconds for the kept-alive connection. It is forwarded to
-C<< HTTP::Tiny->new >> only when you set it. HTTP::Tiny itself (up to and
-including 0.086) has no idle-timeout setting and ignores constructor keys it
-does not know, so with the stock user agent the value is stored (see
-L</ACCESSORS>) but changes nothing: HTTP::Tiny detects a connection the
-server has closed and opens a new one. Not applied when C<ua> is supplied.
+Idle timeout in seconds for the kept-alive connection: once it has gone
+unused for longer than this, the next request opens a fresh connection
+instead of reusing it. Honoured by L<HTTP::Tiny> 0.092 and later, whose own
+default (no limit) applies when you leave it unset; older HTTP::Tiny has no
+such setting and ignores it, in which case the value is merely stored (see
+L</ACCESSORS>). api.ipdata.co keeps idle connections open for roughly two
+minutes, so 60 is a sensible value. Not applied when C<ua> is supplied.
 
 =item ua
 
@@ -405,7 +414,10 @@ C<POST /bulk> request gets the same single retry from this module, but only
 when the failure happened at the socket level before any response arrived
 (HTTP::Tiny status 599 with a I<Socket closed>, I<Unexpected end of stream>
 or I<Connection reset> error). A request that received an HTTP status is
-never retried.
+never retried. With HTTP::Tiny 0.092 or later, C<< keep_alive_timeout => 60 >>
+additionally stops reusing a connection that has been idle for a minute,
+before the server (which keeps idle connections for roughly two minutes) can
+drop it silently.
 
 A C<Net::IPData> object is not shared between threads: use one object per
 thread. It is fork-safe: HTTP::Tiny 0.049 and later records the process and

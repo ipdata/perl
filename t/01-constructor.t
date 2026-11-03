@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 use strict;
 use warnings;
-use Test::More tests => 34;
+use Test::More tests => 35;
 
 use_ok('Net::IPData');
 
@@ -68,6 +68,13 @@ is($no_keep_alive->ua->keep_alive, 0, 'HTTP::Tiny is built with keep_alive => 0'
 my $idle = Net::IPData->new(api_key => 'test_key', keep_alive_timeout => 60);
 is($idle->keep_alive_timeout, 60, 'keep_alive_timeout is stored');
 is($idle->keep_alive, 1, 'keep_alive still defaults to 1 alongside keep_alive_timeout');
+SKIP: {
+    skip "HTTP::Tiny $HTTP::Tiny::VERSION predates keep_alive_timeout (0.092)", 1
+        unless eval { HTTP::Tiny->VERSION('0.092') };
+    # The attribute HTTP::Tiny::Handle reads to decide whether a kept-alive
+    # connection has sat idle for too long.
+    is($idle->ua->{keep_alive_timeout}, 60, 'keep_alive_timeout reaches the HTTP::Tiny object');
+}
 
 # --- ua injection ---
 {
