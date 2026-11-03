@@ -63,6 +63,8 @@ printf "Timezone:  %s\n", $result->{time_zone}{name};
 printf "Currency:  %s (%s)\n", $result->{currency}{name}, $result->{currency}{code};
 printf "EU:        %s\n", $result->{is_eu} ? 'Yes' : 'No';
 printf "Threat:    %s\n", $result->{threat}{is_threat} ? 'Yes' : 'No';
+printf "Satellite: %s\n", $result->{is_satellite} ? 'Yes' : 'No';   # key present only when true
+printf "Anycast:   %s\n", $result->{is_anycast} ? 'Yes' : 'No';     # key present only when true
 ```
 
 ### Look Up Your Own IP
@@ -122,6 +124,8 @@ my $langs   = $ipdata->languages('8.8.8.8');     # arrayref
 my $country = $ipdata->country_name('8.8.8.8');  # string
 my $code    = $ipdata->country_code('8.8.8.8');  # string
 my $eu      = $ipdata->is_eu('8.8.8.8');         # boolean
+my $sat     = $ipdata->is_satellite('8.8.8.8');  # boolean
+my $anycast = $ipdata->is_anycast('8.8.8.8');    # boolean
 
 # Or use the generic method for any path-accessible field
 my $city = $ipdata->lookup_field('8.8.8.8', 'city');
@@ -222,6 +226,8 @@ my $ipdata = Net::IPData->new(api_key => 'YOUR_API_KEY', ua => $ua);
 | `country_name($ip)` | string | Country name |
 | `country_code($ip)` | string | ISO 3166-1 alpha-2 country code |
 | `is_eu($ip)` | boolean | EU member state |
+| `is_satellite($ip)` | boolean | Satellite internet provider |
+| `is_anycast($ip)` | boolean | Anycast address |
 
 ## API Response Structure
 
@@ -231,6 +237,8 @@ A full lookup returns a hashref with this shape:
 {
     ip             => "8.8.8.8",
     is_eu          => false,
+    is_satellite   => true,     # present only when true
+    is_anycast     => true,     # present only when true
     city           => "Mountain View",
     region         => "California",
     region_code    => "CA",
@@ -254,9 +262,23 @@ A full lookup returns a hashref with this shape:
     time_zone => { name, abbr, offset, is_dst, current_time },
     threat    => { is_tor, is_icloud_relay, is_proxy, is_datacenter,
                    is_anonymous, is_known_attacker, is_known_abuser,
-                   is_threat, is_bogon },
+                   is_threat, is_bogon,
+                   blocklists => [{ name, site, type,
+                                    first_seen, last_seen, days_seen }] },
 }
 ```
+
+The JSON is passed through unchanged, so keys the API adds later simply appear in the hashref. Five fields deserve a note:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `is_satellite` | boolean | The address belongs to a satellite internet provider. The API includes the key only when it is true, so test it with a plain `if ($result->{is_satellite})`, never with `exists`; a missing key reads as false |
+| `is_anycast` | boolean | The address is an anycast address. Present only when true, like `is_satellite` |
+| `threat.blocklists[].first_seen` | string | First calendar date (UTC, `YYYY-MM-DD`) on which that blocklist listed the address; left as a string |
+| `threat.blocklists[].last_seen` | string | Most recent such date (UTC, `YYYY-MM-DD`); left as a string |
+| `threat.blocklists[].days_seen` | integer | Number of days that blocklist has listed the address |
+
+Some feeds, for example ipdata's own vpn feed, omit all three blocklist fields, so check for them with `exists` before use. Bulk results carry the same shape per item.
 
 ## Requirements
 

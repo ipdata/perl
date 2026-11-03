@@ -15,6 +15,12 @@ Revision history for Net-IPData
     - Require HTTP::Tiny 0.049 or later (fork- and thread-safe keep-alive)
     - CI runs on every push and pull request and installs the declared
       prerequisites before testing
+    - New API response fields: top-level is_satellite and is_anycast (present
+      only when true; a missing key reads as false) and first_seen, last_seen
+      and days_seen on threat.blocklists entries (optional; dates kept as
+      YYYY-MM-DD strings); the JSON passes through unchanged
+    - is_satellite and is_anycast are accepted in fields => and lookup_field,
+      with is_satellite($ip) and is_anycast($ip) convenience methods
 
 1.0.0  2026-02-23
     - Initial release

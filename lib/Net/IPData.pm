@@ -20,7 +20,7 @@ use constant {
 
 # Valid top-level fields for filtering
 my %VALID_FIELDS = map { $_ => 1 } qw(
-    ip is_eu city region region_code region_type
+    ip is_eu is_satellite is_anycast city region region_code region_type
     country_name country_code continent_name continent_code
     latitude longitude postal calling_code flag
     emoji_flag emoji_unicode asn company carrier
@@ -29,7 +29,7 @@ my %VALID_FIELDS = map { $_ => 1 } qw(
 
 # Valid single-field path lookups (fields accessible via /{ip}/{field})
 my %PATH_FIELDS = map { $_ => 1 } qw(
-    ip is_eu city region region_code region_type
+    ip is_eu is_satellite is_anycast city region region_code region_type
     country_name country_code continent_name continent_code
     latitude longitude postal calling_code flag
     emoji_flag emoji_unicode asn carrier languages
@@ -188,6 +188,16 @@ sub is_eu {
     return $self->lookup_field($ip, 'is_eu');
 }
 
+sub is_satellite {
+    my ($self, $ip) = @_;
+    return $self->lookup_field($ip, 'is_satellite');
+}
+
+sub is_anycast {
+    my ($self, $ip) = @_;
+    return $self->lookup_field($ip, 'is_anycast');
+}
+
 # --- Accessors ---
 
 sub api_key            { return $_[0]->{api_key} }
@@ -305,6 +315,10 @@ Net::IPData - Perl client for the ipdata.co IP geolocation and threat intelligen
     my $result = $ipdata->lookup('8.8.8.8');
     printf "IP: %s, Country: %s, City: %s\n",
         $result->{ip}, $result->{country_name}, $result->{city};
+
+    # Flags the API includes only when true (a missing key reads as false)
+    print "satellite ISP\n"    if $result->{is_satellite};
+    print "anycast address\n"  if $result->{is_anycast};
 
     # Look up your own IP address
     my $me = $ipdata->lookup_mine();
@@ -470,6 +484,10 @@ The following methods call C<lookup_field> for common fields:
 
 =item is_eu($ip) - EU membership (boolean)
 
+=item is_satellite($ip) - Satellite internet provider flag (boolean)
+
+=item is_anycast($ip) - Anycast address flag (boolean)
+
 =back
 
 =head1 ACCESSORS
@@ -510,7 +528,8 @@ when available.
 
 A full lookup returns a hashref with the following keys:
 
-    ip, is_eu, city, region, region_code, region_type,
+    ip, is_eu, is_satellite, is_anycast,
+    city, region, region_code, region_type,
     country_name, country_code, continent_name, continent_code,
     latitude, longitude, postal, calling_code, flag,
     emoji_flag, emoji_unicode,
@@ -522,8 +541,42 @@ A full lookup returns a hashref with the following keys:
     time_zone => { name, abbr, offset, is_dst, current_time },
     threat   => { is_tor, is_icloud_relay, is_proxy, is_datacenter,
                   is_anonymous, is_known_attacker, is_known_abuser,
-                  is_threat, is_bogon },
+                  is_threat, is_bogon,
+                  blocklists => [{ name, site, type,
+                                   first_seen, last_seen, days_seen }] },
     count    => N  (for bulk lookups)
+
+The JSON is passed through unchanged, so keys the API adds later simply
+appear in the hashref. Five fields deserve a note:
+
+=over 4
+
+=item is_satellite
+
+True when the address belongs to a satellite internet provider. The API
+includes this key only when it is true and omits it otherwise, so test it
+with a plain boolean check (C<< if ($result->{is_satellite}) >>), never
+with C<exists>; a missing key reads as false.
+
+=item is_anycast
+
+True when the address is an anycast address. Present only when true, like
+C<is_satellite>.
+
+=item first_seen, last_seen (per C<< threat->{blocklists} >> entry)
+
+The first and the most recent calendar date (UTC, C<YYYY-MM-DD>) on which
+that blocklist listed the address. The module leaves them as strings.
+
+=item days_seen (per C<< threat->{blocklists} >> entry)
+
+The number of days that blocklist has listed the address (integer).
+
+=back
+
+Some feeds, for example ipdata's own vpn feed, omit all three blocklist
+fields, so check for them with C<exists> before use. Bulk results carry the
+same shape per item.
 
 =head1 REQUIREMENTS
 
