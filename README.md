@@ -10,6 +10,7 @@ Perl client for the [ipdata.co](https://ipdata.co/) IP geolocation and threat in
 - **EU endpoint** -- route requests through EU-only servers for GDPR compliance
 - **Zero non-core dependencies** -- uses only `HTTP::Tiny` and `JSON::PP` (core since Perl 5.14)
 - **Connection reuse** -- one persistent HTTPS connection per client object (HTTP/1.1 keep-alive), so only the first request pays the TLS handshake
+- **Certificate verification** -- the API server's TLS certificate is verified with every `HTTP::Tiny` version (`verify_ssl => 0` turns it off)
 - **Production ready** -- input validation, structured error handling, configurable timeouts
 
 ## Installation
@@ -193,7 +194,11 @@ A `Net::IPData` object is not shared between threads: use one per thread. It is 
 Pass `keep_alive => 0` to open a new connection per request, or supply your own user agent with `ua => $obj` (any object with `HTTP::Tiny`-compatible `get`/`post` methods returning `{status, content, headers, success}`), for example a pre-configured `HTTP::Tiny` or a mock in tests:
 
 ```perl
-my $ua     = HTTP::Tiny->new(verify_SSL => 1, keep_alive => 1, timeout => 10);
+my $ua     = HTTP::Tiny->new(
+    keep_alive  => 1,
+    timeout     => 10,
+    SSL_options => { SSL_ca_file => '/etc/ssl/private-ca.pem' },
+);
 my $ipdata = Net::IPData->new(api_key => 'YOUR_API_KEY', ua => $ua);
 ```
 
@@ -207,6 +212,7 @@ my $ipdata = Net::IPData->new(api_key => 'YOUR_API_KEY', ua => $ua);
 | `timeout` | int | `30` | HTTP timeout in seconds |
 | `keep_alive` | bool | `1` | Keep the HTTPS connection open between requests (HTTP/1.1 keep-alive); `0` opens a new connection per request |
 | `keep_alive_timeout` | int | *unset* | Seconds a kept-alive connection may sit idle before the next request opens a fresh one; honoured by `HTTP::Tiny` 0.092+ (older versions ignore it) and forwarded only when set; `60` suits api.ipdata.co |
+| `verify_ssl` | bool | `1` | Verify the API server's TLS certificate. Passed to `HTTP::Tiny` as `verify_SSL`, so the check applies with every `HTTP::Tiny` version (not only 0.083+, which verify by default) and needs a CA bundle (`Mozilla::CA` or the operating system's); `0` connects without checking the server's identity |
 | `ua` | object | new `HTTP::Tiny` | Your own user agent: any object with `HTTP::Tiny`-compatible `get`/`post` returning `{status, content, headers, success}` |
 
 ## Methods
@@ -284,7 +290,7 @@ Some feeds, for example ipdata's own vpn feed, omit all three blocklist fields, 
 
 - Perl 5.10.1 or later
 - Core modules only: [HTTP::Tiny](https://metacpan.org/pod/HTTP::Tiny) 0.049 or later (ships with Perl 5.22+; older Perls install it from CPAN), [JSON::PP](https://metacpan.org/pod/JSON::PP), [Carp](https://metacpan.org/pod/Carp), [Scalar::Util](https://metacpan.org/pod/Scalar::Util)
-- Recommended: [IO::Socket::SSL](https://metacpan.org/pod/IO::Socket::SSL) and [Net::SSLeay](https://metacpan.org/pod/Net::SSLeay) for HTTPS support
+- Recommended: [IO::Socket::SSL](https://metacpan.org/pod/IO::Socket::SSL) 1.56+ and [Net::SSLeay](https://metacpan.org/pod/Net::SSLeay) 1.49+ for HTTPS, plus a CA bundle ([Mozilla::CA](https://metacpan.org/pod/Mozilla::CA) or the operating system's) for the certificate verification that is on by default (`verify_ssl => 1`)
 
 ## Testing
 

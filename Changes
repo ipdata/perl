@@ -1,5 +1,12 @@
 Revision history for Net-IPData
 
+Unreleased
+    - The API server's TLS certificate is now verified with every HTTP::Tiny
+      version: verify_SSL => 1 is passed explicitly (HTTP::Tiny before 0.083
+      verified only when asked to, and 0.083+ can be told not to through an
+      environment variable), with a new constructor option verify_ssl
+      (default 1; 0 disables the check) and a matching accessor
+
 1.1.0  2026-11-03
     - Connection reuse: the HTTP::Tiny user agent keeps one HTTPS connection
       alive across requests (keep_alive => 1, now explicit and configurable);

@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 use strict;
 use warnings;
-use Test::More tests => 35;
+use Test::More tests => 41;
 
 use_ok('Net::IPData');
 
@@ -59,6 +59,20 @@ is($ipd->ua->agent, "Net-IPData-Perl/$Net::IPData::VERSION", 'HTTP::Tiny carries
 my $ssl_options = $ipd->ua->SSL_options || {};
 ok(!$ssl_options->{SSL_alpn_protocols}, 'no ALPN protocols (h2) are advertised');
 
+# --- TLS certificate verification ---
+is($ipd->verify_ssl, 1, 'verify_ssl defaults to 1');
+is($ipd->ua->verify_SSL, 1, 'HTTP::Tiny is built with verify_SSL => 1 whatever its version');
+{
+    # HTTP::Tiny 0.083+ consults this variable only when verify_SSL is not
+    # passed; the module always passes it, so the check stays on.
+    local $ENV{PERL_HTTP_TINY_SSL_INSECURE_BY_DEFAULT} = 1;
+    my $env = Net::IPData->new(api_key => 'test_key');
+    is($env->ua->verify_SSL, 1, 'verify_SSL stays on regardless of PERL_HTTP_TINY_SSL_INSECURE_BY_DEFAULT');
+}
+my $insecure = Net::IPData->new(api_key => 'test_key', verify_ssl => 0);
+is($insecure->verify_ssl, 0, 'verify_ssl => 0 is stored');
+is($insecure->ua->verify_SSL, 0, 'HTTP::Tiny is built with verify_SSL => 0 when asked');
+
 # --- keep_alive => 0 ---
 my $no_keep_alive = Net::IPData->new(api_key => 'test_key', keep_alive => 0);
 is($no_keep_alive->keep_alive, 0, 'keep_alive => 0 is stored');
@@ -109,6 +123,7 @@ my $mock_ua  = My::Test::UA->new;
 my $injected = Net::IPData->new(api_key => 'test_key', ua => $mock_ua);
 is($injected->ua, $mock_ua, 'injected ua is used as-is');
 is($injected->keep_alive, 1, 'keep_alive is still recorded with an injected ua');
+is($injected->verify_ssl, 1, 'verify_ssl is still recorded with an injected ua');
 
 my $result = $injected->lookup('8.8.8.8');
 is($result->{city}, 'Mountain View', 'lookup goes through the injected ua');

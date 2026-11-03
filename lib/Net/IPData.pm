@@ -52,6 +52,7 @@ sub new {
     my $timeout            = $args{timeout} // 30;
     my $keep_alive         = $args{keep_alive} // 1;
     my $keep_alive_timeout = $args{keep_alive_timeout};
+    my $verify_ssl         = ($args{verify_ssl} // 1) ? 1 : 0;
 
     # One user agent per Net::IPData object: it owns the kept-alive HTTPS
     # connection, so building it once here (and never per request) is what
@@ -66,6 +67,10 @@ sub new {
             agent           => "Net-IPData-Perl/$VERSION",
             timeout         => $timeout,
             keep_alive      => $keep_alive,
+            # Always passed explicitly: HTTP::Tiny before 0.083 verifies the
+            # server certificate only when asked to, and from 0.083 on its
+            # default can be switched off by an environment variable.
+            verify_SSL      => $verify_ssl,
             # Forwarded only when the caller asked for one, so HTTP::Tiny's
             # own default (no idle limit) applies otherwise; HTTP::Tiny
             # before 0.092 has no such setting and ignores the key.
@@ -93,6 +98,7 @@ sub new {
         timeout            => $timeout,
         keep_alive         => $keep_alive,
         keep_alive_timeout => $keep_alive_timeout,
+        verify_ssl         => $verify_ssl,
     }, $class;
 }
 
@@ -213,6 +219,7 @@ sub base_url           { return $_[0]->{base_url} }
 sub timeout            { return $_[0]->{timeout} }
 sub keep_alive         { return $_[0]->{keep_alive} }
 sub keep_alive_timeout { return $_[0]->{keep_alive_timeout} }
+sub verify_ssl         { return $_[0]->{verify_ssl} }
 sub ua                 { return $_[0]->{ua} }
 
 # --- Private Methods ---
@@ -365,6 +372,7 @@ has no non-core dependencies.
         timeout            => 30,               # HTTP timeout in seconds (default: 30)
         keep_alive         => 1,                # reuse the HTTPS connection (default: 1)
         keep_alive_timeout => 60,               # idle timeout in seconds (default: none)
+        verify_ssl         => 1,                # verify the server certificate (default: 1)
         ua                 => $user_agent,      # your own HTTP::Tiny-compatible object
     );
 
@@ -386,15 +394,30 @@ such setting and ignores it, in which case the value is merely stored (see
 L</ACCESSORS>). api.ipdata.co keeps idle connections open for roughly two
 minutes, so 60 is a sensible value. Not applied when C<ua> is supplied.
 
+=item verify_ssl
+
+Whether the API server's TLS certificate is verified (chain and host name),
+default 1. The value is passed to L<HTTP::Tiny> as C<verify_SSL>, so
+certificates are checked with every HTTP::Tiny version, not only with 0.083
+and later (which verify by default), and independently of HTTP::Tiny's
+C<PERL_HTTP_TINY_SSL_INSECURE_BY_DEFAULT> environment variable.
+Verification needs a CA bundle: HTTP::Tiny uses L<Mozilla::CA> when it is
+installed and otherwise the operating system's bundle (see "SSL SUPPORT" in
+L<HTTP::Tiny>); without one every request fails with a C<Network error>.
+Set it to 0 only when you must talk to a server whose certificate cannot be
+verified, for example a local test endpoint given as C<base_url>: the
+connection is still encrypted but the server's identity is not checked. Not
+applied when C<ua> is supplied.
+
 =item ua
 
 An object to use instead of a new L<HTTP::Tiny>: anything with
 HTTP::Tiny-compatible C<get($url)> and C<post($url, \%options)> methods that
 return a hashref with C<status>, C<content>, C<headers> and C<success>. Use
-it to share one pre-configured HTTP::Tiny (proxy, C<verify_SSL>,
-C<SSL_options>) or to inject a mock in tests. C<timeout>, C<keep_alive> and
-C<keep_alive_timeout> are not applied to a supplied object; configure it
-yourself.
+it to share one pre-configured HTTP::Tiny (proxy, C<SSL_options> such as a
+private CA file) or to inject a mock in tests. C<timeout>, C<keep_alive>,
+C<keep_alive_timeout> and C<verify_ssl> are not applied to a supplied
+object; configure it yourself.
 
 =back
 
@@ -516,6 +539,8 @@ The following methods call C<lookup_field> for common fields:
 
 =item keep_alive_timeout - The idle timeout given to the constructor, or undef
 
+=item verify_ssl - Whether the server certificate is verified (default 1)
+
 =item ua - The user agent object (an L<HTTP::Tiny> unless one was injected)
 
 =back
@@ -606,6 +631,12 @@ with Perl 5.22 and later, older Perls install it from CPAN)
 =item * L<Scalar::Util> (core)
 
 =back
+
+HTTPS itself needs L<IO::Socket::SSL> 1.56 and L<Net::SSLeay> 1.49 or later,
+plus a CA bundle (L<Mozilla::CA> or the operating system's) for the
+certificate verification that is on by default (see L</verify_ssl>). They
+are recommended rather than required prerequisites so that the module can be
+installed where they are not available.
 
 =head1 SEE ALSO
 
