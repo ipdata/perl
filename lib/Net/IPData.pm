@@ -598,11 +598,13 @@ A full lookup returns a hashref with the following keys:
     languages => [{ name, native, code }],
     currency => { name, code, symbol, native, plural },
     time_zone => { name, abbr, offset, is_dst, current_time },
-    threat   => { is_tor, is_icloud_relay, is_proxy, is_datacenter,
+    threat   => { is_tor, is_vpn, is_icloud_relay, is_proxy, is_datacenter,
                   is_anonymous, is_known_attacker, is_known_abuser,
                   is_threat, is_bogon,
                   blocklists => [{ name, site, type,
-                                   first_seen, last_seen, days_seen }] },
+                                   first_seen, last_seen, days_seen }],
+                  scores => { vpn_score, proxy_score,
+                              threat_score, trust_score } },
     count    => N  (for bulk lookups)
 
 The JSON is passed through unchanged, so keys the API adds later simply

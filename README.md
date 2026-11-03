@@ -228,7 +228,7 @@ my $ipdata = Net::IPData->new(api_key => 'YOUR_API_KEY', ua => $ua);
 | `lookup_field($ip, $field)` | varies | Single field via path API |
 | `bulk(\@ips, %opts)` | arrayref | Bulk lookup for up to 100 IPs |
 | `asn($ip)` | hashref | ASN data (`asn`, `name`, `domain`, `route`, `type`) |
-| `threat($ip)` | hashref | Threat flags (`is_tor`, `is_proxy`, `is_threat`, ...) |
+| `threat($ip)` | hashref | Threat flags (`is_tor`, `is_vpn`, `is_proxy`, `is_threat`, ...), `blocklists` and `scores` |
 | `carrier($ip)` | hashref | Mobile carrier (`name`, `mcc`, `mnc`) |
 | `currency($ip)` | hashref | Currency (`name`, `code`, `symbol`, `native`, `plural`) |
 | `time_zone($ip)` | hashref | Timezone (`name`, `abbr`, `offset`, `is_dst`, `current_time`) |
@@ -270,11 +270,13 @@ A full lookup returns a hashref with this shape:
     languages => [{ name, native, code }],
     currency  => { name, code, symbol, native, plural },
     time_zone => { name, abbr, offset, is_dst, current_time },
-    threat    => { is_tor, is_icloud_relay, is_proxy, is_datacenter,
+    threat    => { is_tor, is_vpn, is_icloud_relay, is_proxy, is_datacenter,
                    is_anonymous, is_known_attacker, is_known_abuser,
                    is_threat, is_bogon,
                    blocklists => [{ name, site, type,
-                                    first_seen, last_seen, days_seen }] },
+                                    first_seen, last_seen, days_seen }],
+                   scores => { vpn_score, proxy_score,
+                               threat_score, trust_score } },
 }
 ```
 
