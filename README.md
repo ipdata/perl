@@ -312,6 +312,15 @@ Run the full suite including live API tests:
 IPDATA_API_KEY=your_key_here make test
 ```
 
+## Releasing
+
+Releases are made by CI; nothing is tagged by hand. To publish a new version:
+
+1. In a pull request, bump `$VERSION` in `lib/Net/IPData.pm` and give the `Unreleased` entry in `Changes` its version number and date.
+2. Merge it. CI tags the merge commit `vX.Y.Z`, creates the GitHub release with generated notes and uploads the distribution to CPAN.
+
+A merge whose version is already tagged publishes nothing. The release trigger is kept, so publishing a GitHub release by hand still uploads its tag to CPAN.
+
 ## License
 
 This module is free software; you can redistribute it and/or modify it under the same terms as Perl itself.

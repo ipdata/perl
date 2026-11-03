@@ -3,12 +3,21 @@ name: Release to CPAN
 on:
   release:
     types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        description: Tag of the release to upload (for example v1.2.0)
+        required: true
+        type: string
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # the tag passed by the calling workflow, or the published release's tag
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
 
       - uses: shogo82148/actions-setup-perl@v1
         with:

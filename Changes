@@ -1,5 +1,10 @@
 Revision history for Net-IPData
 
+Unreleased
+    - Releases are made by CI: merging a pull request that bumps $VERSION
+      tags vX.Y.Z, creates the GitHub release and uploads the distribution
+      to CPAN; a merge whose version is already tagged publishes nothing
+
 1.1.0  2026-11-03
     - The API server's TLS certificate is now verified with every HTTP::Tiny
       version: verify_SSL => 1 is passed explicitly (HTTP::Tiny before 0.083
