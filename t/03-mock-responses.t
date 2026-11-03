@@ -13,7 +13,9 @@ my @mock_responses;
 my @mock_calls;    # [ method, HTTP::Tiny object, url, opts ] for every request made
 
 {
-    no warnings 'redefine';
+    # 'once': each glob is assigned here and nowhere else, which would
+    # otherwise draw a "used only once: possible typo" warning
+    no warnings qw(redefine once);
 
     *HTTP::Tiny::get = sub {
         my ($self, $url) = @_;
