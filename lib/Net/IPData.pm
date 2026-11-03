@@ -7,7 +7,7 @@ use 5.010001;
 our $VERSION = '1.1.0';
 
 use HTTP::Tiny;
-use JSON::PP qw(encode_json decode_json);
+use JSON::PP qw(encode_json);
 use Carp qw(croak);
 use Scalar::Util qw(blessed);
 
@@ -17,6 +17,12 @@ use constant {
     EU_BASE_URL => 'https://eu-api.ipdata.co',
     MAX_BULK    => 100,
 };
+
+# Single-field lookups (/{ip}/{field}) answer with a bare JSON value: a
+# string, a number, true, false or null. JSON::PP before 4.0 rejects such a
+# top-level scalar unless allow_nonref is set, hence one configured decoder
+# instead of decode_json.
+my $JSON = JSON::PP->new->utf8->allow_nonref;
 
 # Valid top-level fields for filtering
 my %VALID_FIELDS = map { $_ => 1 } qw(
@@ -52,6 +58,7 @@ sub new {
     my $timeout            = $args{timeout} // 30;
     my $keep_alive         = $args{keep_alive} // 1;
     my $keep_alive_timeout = $args{keep_alive_timeout};
+    my $verify_ssl         = ($args{verify_ssl} // 1) ? 1 : 0;
 
     # One user agent per Net::IPData object: it owns the kept-alive HTTPS
     # connection, so building it once here (and never per request) is what
@@ -63,19 +70,22 @@ sub new {
     }
     else {
         $ua = HTTP::Tiny->new(
-            agent           => "Net-IPData-Perl/$VERSION",
+            agent           => "ipdata-perl/$VERSION",
             timeout         => $timeout,
             keep_alive      => $keep_alive,
+            # Always passed explicitly: HTTP::Tiny before 0.083 verifies the
+            # server certificate only when asked to, and from 0.083 on its
+            # default can be switched off by an environment variable.
+            verify_SSL      => $verify_ssl,
             # Forwarded only when the caller asked for one, so HTTP::Tiny's
             # own default (no idle limit) applies otherwise; HTTP::Tiny
             # before 0.092 has no such setting and ignores the key.
             (defined $keep_alive_timeout
                 ? (keep_alive_timeout => $keep_alive_timeout)
                 : ()),
-            default_headers => {
-                'Accept'       => 'application/json',
-                'Content-Type' => 'application/json',
-            },
+            # Content-Type belongs to the one request with a body, the bulk
+            # POST, which adds it itself (see _post_options).
+            default_headers => { Accept => 'application/json' },
         );
         # HTTP::Tiny 0.092 and later document keep_alive_timeout as a
         # constructor attribute, but their constructor (checked up to 0.096)
@@ -93,6 +103,7 @@ sub new {
         timeout            => $timeout,
         keep_alive         => $keep_alive,
         keep_alive_timeout => $keep_alive_timeout,
+        verify_ssl         => $verify_ssl,
     }, $class;
 }
 
@@ -213,6 +224,7 @@ sub base_url           { return $_[0]->{base_url} }
 sub timeout            { return $_[0]->{timeout} }
 sub keep_alive         { return $_[0]->{keep_alive} }
 sub keep_alive_timeout { return $_[0]->{keep_alive_timeout} }
+sub verify_ssl         { return $_[0]->{verify_ssl} }
 sub ua                 { return $_[0]->{ua} }
 
 # --- Private Methods ---
@@ -237,7 +249,7 @@ sub _post {
     my ($self, $url, $data) = @_;
 
     my $body     = encode_json($data);
-    my $response = $self->{ua}->post($url, { content => $body });
+    my $response = $self->{ua}->post($url, _post_options($body));
 
     # A kept-alive connection can be closed by the server while idle.
     # HTTP::Tiny retries idempotent methods on such a socket itself but never
@@ -245,10 +257,18 @@ sub _post {
     # (status 599) rather than an HTTP status. HTTP::Tiny has already dropped
     # the dead connection by then, so the retry opens a fresh one.
     if (_is_stale_connection_error($response)) {
-        $response = $self->{ua}->post($url, { content => $body });
+        $response = $self->{ua}->post($url, _post_options($body));
     }
 
     return $self->_handle_response($response);
+}
+
+# Options for the bulk POST: the JSON body and its Content-Type, which only
+# a request with a body sends. A fresh hashref per attempt, as HTTP::Tiny
+# adds bookkeeping keys to the one it is given.
+sub _post_options {
+    my ($body) = @_;
+    return { content => $body, headers => { 'Content-Type' => 'application/json' } };
 }
 
 # True for the status-599 pseudo-responses HTTP::Tiny returns when a reused
@@ -272,12 +292,12 @@ sub _handle_response {
         croak "Network error: $content";
     }
 
-    # Try to decode JSON
+    # Decode the JSON, including the bare scalar a single-field lookup returns
     my $data;
-    eval { $data = decode_json($content); };
+    eval { $data = $JSON->decode($content); };
     if ($@) {
-        # Non-JSON response (e.g., single field value like country_name)
-        # The API returns bare strings for single-field path lookups
+        # Not JSON at all (for example an HTML error page): return or report
+        # the trimmed text
         $content =~ s/^\s+|\s+$//g;    # trim whitespace
         $content =~ s/^"|"$//g;        # strip surrounding quotes
 
@@ -365,6 +385,7 @@ has no non-core dependencies.
         timeout            => 30,               # HTTP timeout in seconds (default: 30)
         keep_alive         => 1,                # reuse the HTTPS connection (default: 1)
         keep_alive_timeout => 60,               # idle timeout in seconds (default: none)
+        verify_ssl         => 1,                # verify the server certificate (default: 1)
         ua                 => $user_agent,      # your own HTTP::Tiny-compatible object
     );
 
@@ -386,15 +407,30 @@ such setting and ignores it, in which case the value is merely stored (see
 L</ACCESSORS>). api.ipdata.co keeps idle connections open for roughly two
 minutes, so 60 is a sensible value. Not applied when C<ua> is supplied.
 
+=item verify_ssl
+
+Whether the API server's TLS certificate is verified (chain and host name),
+default 1. The value is passed to L<HTTP::Tiny> as C<verify_SSL>, so
+certificates are checked with every HTTP::Tiny version, not only with 0.083
+and later (which verify by default), and independently of HTTP::Tiny's
+C<PERL_HTTP_TINY_SSL_INSECURE_BY_DEFAULT> environment variable.
+Verification needs a CA bundle: HTTP::Tiny uses L<Mozilla::CA> when it is
+installed and otherwise the operating system's bundle (see "SSL SUPPORT" in
+L<HTTP::Tiny>); without one every request fails with a C<Network error>.
+Set it to 0 only when you must talk to a server whose certificate cannot be
+verified, for example a local test endpoint given as C<base_url>: the
+connection is still encrypted but the server's identity is not checked. Not
+applied when C<ua> is supplied.
+
 =item ua
 
 An object to use instead of a new L<HTTP::Tiny>: anything with
 HTTP::Tiny-compatible C<get($url)> and C<post($url, \%options)> methods that
 return a hashref with C<status>, C<content>, C<headers> and C<success>. Use
-it to share one pre-configured HTTP::Tiny (proxy, C<verify_SSL>,
-C<SSL_options>) or to inject a mock in tests. C<timeout>, C<keep_alive> and
-C<keep_alive_timeout> are not applied to a supplied object; configure it
-yourself.
+it to share one pre-configured HTTP::Tiny (proxy, C<SSL_options> such as a
+private CA file) or to inject a mock in tests. C<timeout>, C<keep_alive>,
+C<keep_alive_timeout> and C<verify_ssl> are not applied to a supplied
+object; configure it yourself.
 
 =back
 
@@ -430,6 +466,15 @@ object is destroyed, so letting it go out of scope (or C<undef $ipdata>) at
 shutdown is all the cleanup needed. Pass C<< keep_alive => 0 >> to open a
 new connection per request, or your own C<ua> to control the transport
 completely.
+
+=head1 REQUEST HEADERS
+
+Every request carries C<Accept: application/json> and the user agent
+C<ipdata-perl/VERSION>, VERSION being the module version. The bulk POST,
+the only request with a body, also sends C<Content-Type: application/json>;
+GET requests send no Content-Type. A supplied C<ua> uses its own default
+headers and user agent, but still receives the bulk Content-Type, which the
+module passes with each POST.
 
 =head1 METHODS
 
@@ -516,6 +561,8 @@ The following methods call C<lookup_field> for common fields:
 
 =item keep_alive_timeout - The idle timeout given to the constructor, or undef
 
+=item verify_ssl - Whether the server certificate is verified (default 1)
+
 =item ua - The user agent object (an L<HTTP::Tiny> unless one was injected)
 
 =back
@@ -551,11 +598,13 @@ A full lookup returns a hashref with the following keys:
     languages => [{ name, native, code }],
     currency => { name, code, symbol, native, plural },
     time_zone => { name, abbr, offset, is_dst, current_time },
-    threat   => { is_tor, is_icloud_relay, is_proxy, is_datacenter,
+    threat   => { is_tor, is_vpn, is_icloud_relay, is_proxy, is_datacenter,
                   is_anonymous, is_known_attacker, is_known_abuser,
                   is_threat, is_bogon,
                   blocklists => [{ name, site, type,
-                                   first_seen, last_seen, days_seen }] },
+                                   first_seen, last_seen, days_seen }],
+                  scores => { vpn_score, proxy_score,
+                              threat_score, trust_score } },
     count    => N  (for bulk lookups)
 
 The JSON is passed through unchanged, so keys the API adds later simply
@@ -606,6 +655,12 @@ with Perl 5.22 and later, older Perls install it from CPAN)
 =item * L<Scalar::Util> (core)
 
 =back
+
+HTTPS itself needs L<IO::Socket::SSL> 1.56 and L<Net::SSLeay> 1.49 or later,
+plus a CA bundle (L<Mozilla::CA> or the operating system's) for the
+certificate verification that is on by default (see L</verify_ssl>). They
+are recommended rather than required prerequisites so that the module can be
+installed where they are not available.
 
 =head1 SEE ALSO
 

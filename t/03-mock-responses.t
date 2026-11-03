@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 use strict;
 use warnings;
-use Test::More tests => 50;
+use Test::More tests => 61;
 use JSON::PP qw(encode_json decode_json);
 use Scalar::Util qw(refaddr);
 
@@ -13,10 +13,9 @@ my @mock_responses;
 my @mock_calls;    # [ method, HTTP::Tiny object, url, opts ] for every request made
 
 {
-    no warnings 'redefine';
-
-    my $orig_get  = \&HTTP::Tiny::get;
-    my $orig_post = \&HTTP::Tiny::post;
+    # 'once': each glob is assigned here and nowhere else, which would
+    # otherwise draw a "used only once: possible typo" warning
+    no warnings qw(redefine once);
 
     *HTTP::Tiny::get = sub {
         my ($self, $url) = @_;
@@ -168,6 +167,36 @@ my $ipd = Net::IPData->new(api_key => 'test_key_123');
     is($result->{name}, 'Google LLC', 'lookup_field returns parsed JSON for asn');
 }
 
+# --- Test: single-field lookups answer with a bare JSON scalar, which every
+#     JSON::PP version must decode (before 4.0 only allow_nonref permits it) ---
+{
+    mock_text_response(200, 'false');
+    my $eu = $ipd->is_eu('8.8.8.8');
+    ok(defined $eu && !$eu, 'is_eu: bare false decodes to a defined false value');
+
+    mock_text_response(200, 'true');
+    ok($ipd->is_eu('185.1.1.1'), 'is_eu: bare true decodes to a true value');
+
+    mock_text_response(200, 'null');
+    ok(!defined $ipd->lookup_field('8.8.8.8', 'city'), 'lookup_field: bare null decodes to undef, not the string "null"');
+
+    mock_text_response(200, '"Zürich"');
+    is($ipd->lookup_field('8.8.8.8', 'city'), "Z\x{fc}rich", 'lookup_field: a \u escape in a bare string is decoded');
+
+    mock_text_response(200, '"Mountain \"View\""');
+    is($ipd->lookup_field('8.8.8.8', 'city'), 'Mountain "View"', 'lookup_field: escaped quotes in a bare string are decoded');
+
+    mock_text_response(200, '37.386');
+    is($ipd->lookup_field('8.8.8.8', 'latitude'), 37.386, 'lookup_field: a bare number is returned as a number');
+
+    mock_text_response(200, 'not json at all');
+    is($ipd->lookup_field('8.8.8.8', 'city'), 'not json at all', 'a 2xx body that is not JSON is returned as trimmed text');
+
+    mock_text_response(502, '<html>Bad Gateway</html>');
+    eval { $ipd->lookup('8.8.8.8') };
+    like($@, qr{^HTTP 502: <html>Bad Gateway</html>}, 'an error body that is not JSON is reported with its status');
+}
+
 # --- Test: bulk lookup ---
 {
     my $bulk_data = [
@@ -177,6 +206,7 @@ my $ipd = Net::IPData->new(api_key => 'test_key_123');
     mock_json_response(200, $bulk_data);
 
     my $results = $ipd->bulk(['8.8.8.8', '1.1.1.1']);
+    is($mock_calls[-1][3]{headers}{'Content-Type'}, 'application/json', 'bulk POST carries Content-Type: application/json');
     is(ref $results, 'ARRAY', 'bulk returns array ref');
     is(scalar @$results, 2, 'bulk returns 2 results');
     is($results->[0]{ip}, '8.8.8.8', 'bulk result 0 IP');
@@ -247,6 +277,7 @@ sub mock_network_error {
     is((keys %seen)[0], refaddr($ipd->ua), 'that object is the one the ua accessor returns');
     isa_ok($ipd->ua, 'HTTP::Tiny', 'ua');
     ok($ipd->ua->keep_alive, 'the HTTP::Tiny object has keep_alive enabled');
+    is_deeply($ipd->ua->default_headers, { Accept => 'application/json' }, 'GET requests send Accept only: Content-Type is not a default header');
 }
 
 # --- Test: bulk (POST) is retried once when the kept-alive socket was dead ---
@@ -261,6 +292,7 @@ sub mock_network_error {
     is($mock_calls[1][0], 'post', 'retry was a POST');
     is($mock_calls[1][2], $mock_calls[0][2], 'retry used the same URL');
     is($mock_calls[1][3]{content}, $mock_calls[0][3]{content}, 'retry sent the same body');
+    is($mock_calls[1][3]{headers}{'Content-Type'}, 'application/json', 'retry sent the Content-Type too');
     is($results->[0]{ip}, '8.8.8.8', 'result of the retry is returned');
 }
 

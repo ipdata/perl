@@ -1,7 +1,8 @@
 #!/usr/bin/env perl
 use strict;
 use warnings;
-use lib '../lib';
+use FindBin qw($Bin);
+use lib "$Bin/../lib";    # the module next to this script, whatever the current directory
 use Net::IPData;
 
 my $api_key = $ENV{IPDATA_API_KEY} or die "Set IPDATA_API_KEY environment variable\n";

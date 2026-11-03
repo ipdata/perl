@@ -1,6 +1,23 @@
 Revision history for Net-IPData
 
-1.1.0  2026-11-03
+Unreleased
+    - The API server's TLS certificate is now verified with every HTTP::Tiny
+      version: verify_SSL => 1 is passed explicitly (HTTP::Tiny before 0.083
+      verified only when asked to, and 0.083+ can be told not to through an
+      environment variable), with a new constructor option verify_ssl
+      (default 1; 0 disables the check) and a matching accessor
+    - The User-Agent header is now ipdata-perl/<version> (was
+      Net-IPData-Perl/<version>)
+    - Content-Type: application/json is sent only with the bulk POST, no
+      longer as a default header on GET requests too
+    - Single-field lookups (/{ip}/{field}) decode their bare JSON value with
+      every JSON::PP version: JSON::PP before 4.0 (core before Perl 5.30)
+      rejects a top-level string, number or null, so null came back as the
+      string "null" and escape sequences in strings stayed undecoded
+    - The test suite no longer needs network access (t/02-validation.t used
+      to send requests to api.ipdata.co with a placeholder key)
+    - Documentation: the threat shape lists is_vpn and scores (vpn_score,
+      proxy_score, threat_score, trust_score), which the API returns
     - Connection reuse: the HTTP::Tiny user agent keeps one HTTPS connection
       alive across requests (keep_alive => 1, now explicit and configurable);
       HTTP/2 is not available with HTTP::Tiny, so the saving is the TLS
