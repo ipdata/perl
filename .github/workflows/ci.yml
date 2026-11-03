@@ -28,3 +28,70 @@ jobs:
 
       - name: Test
         run: make test
+
+  # After a merge to the default branch, tag the version declared in
+  # lib/Net/IPData.pm and create its GitHub release, unless that tag exists.
+  release:
+    needs: test
+    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      created: ${{ steps.release.outputs.created }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Read the module version
+        id: version
+        run: |
+          VERSION=$(sed -nE "s/.*VERSION *= *['\"]([^'\"]+)['\"].*/\1/p" lib/Net/IPData.pm | head -1)
+          if [ -z "$VERSION" ]; then
+            echo "::error::no \$VERSION found in lib/Net/IPData.pm"
+            exit 1
+          fi
+          echo "Module version $VERSION, tag v$VERSION"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create the tag and the GitHub release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set +e
+          git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null
+          status=$?
+          set -e
+          case $status in
+            0)
+              echo "Tag $TAG already exists; nothing to release"
+              echo "created=false" >> "$GITHUB_OUTPUT"
+              ;;
+            2)
+              gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+              echo "Created tag and release $TAG"
+              echo "created=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::git ls-remote failed with status $status"
+              exit "$status"
+              ;;
+          esac
+
+  # A tag created with the workflow's own token starts no other workflow run,
+  # so the CPAN upload happens here, in the same run, through the callable
+  # release workflow.
+  publish:
+    needs: release
+    if: needs.release.outputs.created == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+    secrets: inherit
