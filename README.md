@@ -175,6 +175,10 @@ Error messages include the HTTP status code and the API's error message:
 | 429 | Rate limit exceeded |
 | 599 | Network/connection failure |
 
+### Request Headers
+
+Every request carries `Accept: application/json` and the user agent `ipdata-perl/<version>`. The bulk `POST` -- the only request with a body -- also sends `Content-Type: application/json`; `GET` requests send no `Content-Type`.
+
 ## Connection reuse
 
 A `Net::IPData` object keeps one persistent HTTPS connection (HTTP/1.1 keep-alive) for as long as it lives. Create one client per process (or one per API key or endpoint), keep it, and reuse it for every lookup: each new client pays a fresh TLS handshake. HTTP/2 is not available with `HTTP::Tiny`, so the saving is the TLS handshake, not multiplexing.

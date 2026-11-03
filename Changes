@@ -6,6 +6,10 @@ Unreleased
       verified only when asked to, and 0.083+ can be told not to through an
       environment variable), with a new constructor option verify_ssl
       (default 1; 0 disables the check) and a matching accessor
+    - The User-Agent header is now ipdata-perl/<version> (was
+      Net-IPData-Perl/<version>)
+    - Content-Type: application/json is sent only with the bulk POST, no
+      longer as a default header on GET requests too
 
 1.1.0  2026-11-03
     - Connection reuse: the HTTP::Tiny user agent keeps one HTTPS connection

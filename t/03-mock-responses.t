@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 use strict;
 use warnings;
-use Test::More tests => 50;
+use Test::More tests => 53;
 use JSON::PP qw(encode_json decode_json);
 use Scalar::Util qw(refaddr);
 
@@ -177,6 +177,7 @@ my $ipd = Net::IPData->new(api_key => 'test_key_123');
     mock_json_response(200, $bulk_data);
 
     my $results = $ipd->bulk(['8.8.8.8', '1.1.1.1']);
+    is($mock_calls[-1][3]{headers}{'Content-Type'}, 'application/json', 'bulk POST carries Content-Type: application/json');
     is(ref $results, 'ARRAY', 'bulk returns array ref');
     is(scalar @$results, 2, 'bulk returns 2 results');
     is($results->[0]{ip}, '8.8.8.8', 'bulk result 0 IP');
@@ -247,6 +248,7 @@ sub mock_network_error {
     is((keys %seen)[0], refaddr($ipd->ua), 'that object is the one the ua accessor returns');
     isa_ok($ipd->ua, 'HTTP::Tiny', 'ua');
     ok($ipd->ua->keep_alive, 'the HTTP::Tiny object has keep_alive enabled');
+    is_deeply($ipd->ua->default_headers, { Accept => 'application/json' }, 'GET requests send Accept only: Content-Type is not a default header');
 }
 
 # --- Test: bulk (POST) is retried once when the kept-alive socket was dead ---
@@ -261,6 +263,7 @@ sub mock_network_error {
     is($mock_calls[1][0], 'post', 'retry was a POST');
     is($mock_calls[1][2], $mock_calls[0][2], 'retry used the same URL');
     is($mock_calls[1][3]{content}, $mock_calls[0][3]{content}, 'retry sent the same body');
+    is($mock_calls[1][3]{headers}{'Content-Type'}, 'application/json', 'retry sent the Content-Type too');
     is($results->[0]{ip}, '8.8.8.8', 'result of the retry is returned');
 }
 

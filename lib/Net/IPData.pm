@@ -64,7 +64,7 @@ sub new {
     }
     else {
         $ua = HTTP::Tiny->new(
-            agent           => "Net-IPData-Perl/$VERSION",
+            agent           => "ipdata-perl/$VERSION",
             timeout         => $timeout,
             keep_alive      => $keep_alive,
             # Always passed explicitly: HTTP::Tiny before 0.083 verifies the
@@ -77,10 +77,9 @@ sub new {
             (defined $keep_alive_timeout
                 ? (keep_alive_timeout => $keep_alive_timeout)
                 : ()),
-            default_headers => {
-                'Accept'       => 'application/json',
-                'Content-Type' => 'application/json',
-            },
+            # Content-Type belongs to the one request with a body, the bulk
+            # POST, which adds it itself (see _post_options).
+            default_headers => { Accept => 'application/json' },
         );
         # HTTP::Tiny 0.092 and later document keep_alive_timeout as a
         # constructor attribute, but their constructor (checked up to 0.096)
@@ -244,7 +243,7 @@ sub _post {
     my ($self, $url, $data) = @_;
 
     my $body     = encode_json($data);
-    my $response = $self->{ua}->post($url, { content => $body });
+    my $response = $self->{ua}->post($url, _post_options($body));
 
     # A kept-alive connection can be closed by the server while idle.
     # HTTP::Tiny retries idempotent methods on such a socket itself but never
@@ -252,10 +251,18 @@ sub _post {
     # (status 599) rather than an HTTP status. HTTP::Tiny has already dropped
     # the dead connection by then, so the retry opens a fresh one.
     if (_is_stale_connection_error($response)) {
-        $response = $self->{ua}->post($url, { content => $body });
+        $response = $self->{ua}->post($url, _post_options($body));
     }
 
     return $self->_handle_response($response);
+}
+
+# Options for the bulk POST: the JSON body and its Content-Type, which only
+# a request with a body sends. A fresh hashref per attempt, as HTTP::Tiny
+# adds bookkeeping keys to the one it is given.
+sub _post_options {
+    my ($body) = @_;
+    return { content => $body, headers => { 'Content-Type' => 'application/json' } };
 }
 
 # True for the status-599 pseudo-responses HTTP::Tiny returns when a reused
@@ -453,6 +460,15 @@ object is destroyed, so letting it go out of scope (or C<undef $ipdata>) at
 shutdown is all the cleanup needed. Pass C<< keep_alive => 0 >> to open a
 new connection per request, or your own C<ua> to control the transport
 completely.
+
+=head1 REQUEST HEADERS
+
+Every request carries C<Accept: application/json> and the user agent
+C<ipdata-perl/VERSION>, VERSION being the module version. The bulk POST,
+the only request with a body, also sends C<Content-Type: application/json>;
+GET requests send no Content-Type. A supplied C<ua> uses its own default
+headers and user agent, but still receives the bulk Content-Type, which the
+module passes with each POST.
 
 =head1 METHODS
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 use strict;
 use warnings;
-use Test::More tests => 41;
+use Test::More tests => 44;
 
 use_ok('Net::IPData');
 
@@ -55,7 +55,8 @@ ok(!defined $ipd->keep_alive_timeout, 'keep_alive_timeout is unset by default');
 isa_ok($ipd->ua, 'HTTP::Tiny', 'default user agent');
 is($ipd->ua->keep_alive, 1, 'HTTP::Tiny is built with keep_alive => 1');
 is($ipd->ua->timeout, 30, 'HTTP::Tiny is built with the timeout');
-is($ipd->ua->agent, "Net-IPData-Perl/$Net::IPData::VERSION", 'HTTP::Tiny carries the Net-IPData-Perl user agent');
+is($ipd->ua->agent, "ipdata-perl/$Net::IPData::VERSION", 'HTTP::Tiny carries the ipdata-perl/<version> user agent');
+is_deeply($ipd->ua->default_headers, { Accept => 'application/json' }, 'default headers are Accept only: no Content-Type on GET requests');
 my $ssl_options = $ipd->ua->SSL_options || {};
 ok(!$ssl_options->{SSL_alpn_protocols}, 'no ALPN protocols (h2) are advertised');
 
@@ -97,8 +98,8 @@ SKIP: {
     sub new { return bless { calls => [] }, shift }
 
     sub get {
-        my ($self, $url) = @_;
-        push @{ $self->{calls} }, ['get', $url];
+        my ($self, $url, $opts) = @_;
+        push @{ $self->{calls} }, ['get', $url, $opts];
         return {
             status  => 200,
             success => 1,
@@ -129,10 +130,12 @@ my $result = $injected->lookup('8.8.8.8');
 is($result->{city}, 'Mountain View', 'lookup goes through the injected ua');
 is($mock_ua->{calls}[0][0], 'get', 'injected ua received a GET');
 is($mock_ua->{calls}[0][1], 'https://api.ipdata.co/8.8.8.8?api-key=test_key', 'injected ua received the lookup URL');
+ok(!defined $mock_ua->{calls}[0][2], 'GET passes no per-request options, so no Content-Type');
 
 $injected->bulk(['8.8.8.8']);
 is($mock_ua->{calls}[1][0], 'post', 'bulk goes through the injected ua as a POST');
 is($mock_ua->{calls}[1][2]{content}, '["8.8.8.8"]', 'bulk body is the JSON array of IPs');
+is($mock_ua->{calls}[1][2]{headers}{'Content-Type'}, 'application/json', 'bulk POST passes Content-Type: application/json with the request');
 
 eval { Net::IPData->new(api_key => 'test_key', ua => 'not an object') };
 like($@, qr/"ua"/, 'rejects a ua that is not an object');
