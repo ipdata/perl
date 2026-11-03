@@ -6,8 +6,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false   # let every Perl finish so one failure does not cancel the others
       matrix:
-        perl-version: ['5.14', '5.20', '5.26', '5.32', '5.38', '5.40']
+        perl-version: ['5.14', '5.20', '5.26', '5.32', '5.38', '5.40', '5.42', '5.44']
 
     name: Perl ${{ matrix.perl-version }}
     steps:

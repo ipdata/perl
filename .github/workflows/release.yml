@@ -16,6 +16,9 @@ jobs:
           install-modules-with: cpanm
           install-modules: CPAN::Uploader
 
+      - name: Install dependencies
+        run: cpanm --installdeps .
+
       - name: Build and test
         run: |
           perl Makefile.PL
