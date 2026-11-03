@@ -15,9 +15,6 @@ my @mock_calls;    # [ method, HTTP::Tiny object, url, opts ] for every request 
 {
     no warnings 'redefine';
 
-    my $orig_get  = \&HTTP::Tiny::get;
-    my $orig_post = \&HTTP::Tiny::post;
-
     *HTTP::Tiny::get = sub {
         my ($self, $url) = @_;
         push @mock_calls, ['get', $self, $url];

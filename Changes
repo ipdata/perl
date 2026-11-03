@@ -14,6 +14,8 @@ Unreleased
       every JSON::PP version: JSON::PP before 4.0 (core before Perl 5.30)
       rejects a top-level string, number or null, so null came back as the
       string "null" and escape sequences in strings stayed undecoded
+    - The test suite no longer needs network access (t/02-validation.t used
+      to send requests to api.ipdata.co with a placeholder key)
     - Connection reuse: the HTTP::Tiny user agent keeps one HTTPS connection
       alive across requests (keep_alive => 1, now explicit and configurable);
       HTTP/2 is not available with HTTP::Tiny, so the saving is the TLS

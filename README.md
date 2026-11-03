@@ -298,7 +298,7 @@ Some feeds, for example ipdata's own vpn feed, omit all three blocklist fields, 
 
 ## Testing
 
-Run the unit tests (no API key needed):
+Run the unit tests (no API key and no network access needed):
 
 ```sh
 make test
