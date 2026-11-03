@@ -10,8 +10,10 @@ Unreleased
       Net-IPData-Perl/<version>)
     - Content-Type: application/json is sent only with the bulk POST, no
       longer as a default header on GET requests too
-
-1.1.0  2026-11-03
+    - Single-field lookups (/{ip}/{field}) decode their bare JSON value with
+      every JSON::PP version: JSON::PP before 4.0 (core before Perl 5.30)
+      rejects a top-level string, number or null, so null came back as the
+      string "null" and escape sequences in strings stayed undecoded
     - Connection reuse: the HTTP::Tiny user agent keeps one HTTPS connection
       alive across requests (keep_alive => 1, now explicit and configurable);
       HTTP/2 is not available with HTTP::Tiny, so the saving is the TLS

@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 use strict;
 use warnings;
-use Test::More tests => 53;
+use Test::More tests => 61;
 use JSON::PP qw(encode_json decode_json);
 use Scalar::Util qw(refaddr);
 
@@ -166,6 +166,36 @@ my $ipd = Net::IPData->new(api_key => 'test_key_123');
     mock_json_response(200, { asn => 'AS15169', name => 'Google LLC', domain => 'google.com', route => '8.8.8.0/24', type => 'business' });
     my $result = $ipd->lookup_field('8.8.8.8', 'asn');
     is($result->{name}, 'Google LLC', 'lookup_field returns parsed JSON for asn');
+}
+
+# --- Test: single-field lookups answer with a bare JSON scalar, which every
+#     JSON::PP version must decode (before 4.0 only allow_nonref permits it) ---
+{
+    mock_text_response(200, 'false');
+    my $eu = $ipd->is_eu('8.8.8.8');
+    ok(defined $eu && !$eu, 'is_eu: bare false decodes to a defined false value');
+
+    mock_text_response(200, 'true');
+    ok($ipd->is_eu('185.1.1.1'), 'is_eu: bare true decodes to a true value');
+
+    mock_text_response(200, 'null');
+    ok(!defined $ipd->lookup_field('8.8.8.8', 'city'), 'lookup_field: bare null decodes to undef, not the string "null"');
+
+    mock_text_response(200, '"Zürich"');
+    is($ipd->lookup_field('8.8.8.8', 'city'), "Z\x{fc}rich", 'lookup_field: a \u escape in a bare string is decoded');
+
+    mock_text_response(200, '"Mountain \"View\""');
+    is($ipd->lookup_field('8.8.8.8', 'city'), 'Mountain "View"', 'lookup_field: escaped quotes in a bare string are decoded');
+
+    mock_text_response(200, '37.386');
+    is($ipd->lookup_field('8.8.8.8', 'latitude'), 37.386, 'lookup_field: a bare number is returned as a number');
+
+    mock_text_response(200, 'not json at all');
+    is($ipd->lookup_field('8.8.8.8', 'city'), 'not json at all', 'a 2xx body that is not JSON is returned as trimmed text');
+
+    mock_text_response(502, '<html>Bad Gateway</html>');
+    eval { $ipd->lookup('8.8.8.8') };
+    like($@, qr{^HTTP 502: <html>Bad Gateway</html>}, 'an error body that is not JSON is reported with its status');
 }
 
 # --- Test: bulk lookup ---

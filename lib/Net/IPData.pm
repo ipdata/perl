@@ -7,7 +7,7 @@ use 5.010001;
 our $VERSION = '1.1.0';
 
 use HTTP::Tiny;
-use JSON::PP qw(encode_json decode_json);
+use JSON::PP qw(encode_json);
 use Carp qw(croak);
 use Scalar::Util qw(blessed);
 
@@ -17,6 +17,12 @@ use constant {
     EU_BASE_URL => 'https://eu-api.ipdata.co',
     MAX_BULK    => 100,
 };
+
+# Single-field lookups (/{ip}/{field}) answer with a bare JSON value: a
+# string, a number, true, false or null. JSON::PP before 4.0 rejects such a
+# top-level scalar unless allow_nonref is set, hence one configured decoder
+# instead of decode_json.
+my $JSON = JSON::PP->new->utf8->allow_nonref;
 
 # Valid top-level fields for filtering
 my %VALID_FIELDS = map { $_ => 1 } qw(
@@ -286,12 +292,12 @@ sub _handle_response {
         croak "Network error: $content";
     }
 
-    # Try to decode JSON
+    # Decode the JSON, including the bare scalar a single-field lookup returns
     my $data;
-    eval { $data = decode_json($content); };
+    eval { $data = $JSON->decode($content); };
     if ($@) {
-        # Non-JSON response (e.g., single field value like country_name)
-        # The API returns bare strings for single-field path lookups
+        # Not JSON at all (for example an HTML error page): return or report
+        # the trimmed text
         $content =~ s/^\s+|\s+$//g;    # trim whitespace
         $content =~ s/^"|"$//g;        # strip surrounding quotes
 
