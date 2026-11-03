@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use 5.010001;
 
-our $VERSION = '1.0.0';
+our $VERSION = '1.1.0';
 
 use HTTP::Tiny;
 use JSON::PP qw(encode_json decode_json);
@@ -20,7 +20,7 @@ use constant {
 
 # Valid top-level fields for filtering
 my %VALID_FIELDS = map { $_ => 1 } qw(
-    ip is_eu city region region_code region_type
+    ip is_eu is_satellite is_anycast city region region_code region_type
     country_name country_code continent_name continent_code
     latitude longitude postal calling_code flag
     emoji_flag emoji_unicode asn company carrier
@@ -29,7 +29,7 @@ my %VALID_FIELDS = map { $_ => 1 } qw(
 
 # Valid single-field path lookups (fields accessible via /{ip}/{field})
 my %PATH_FIELDS = map { $_ => 1 } qw(
-    ip is_eu city region region_code region_type
+    ip is_eu is_satellite is_anycast city region region_code region_type
     country_name country_code continent_name continent_code
     latitude longitude postal calling_code flag
     emoji_flag emoji_unicode asn carrier languages
@@ -49,22 +49,50 @@ sub new {
     $base_url //= BASE_URL;
     $base_url =~ s{/+$}{};  # strip trailing slashes
 
-    my $timeout = $args{timeout} // 30;
+    my $timeout            = $args{timeout} // 30;
+    my $keep_alive         = $args{keep_alive} // 1;
+    my $keep_alive_timeout = $args{keep_alive_timeout};
 
-    my $ua = HTTP::Tiny->new(
-        agent           => "Net-IPData-Perl/$VERSION",
-        timeout         => $timeout,
-        default_headers => {
-            'Accept'       => 'application/json',
-            'Content-Type' => 'application/json',
-        },
-    );
+    # One user agent per Net::IPData object: it owns the kept-alive HTTPS
+    # connection, so building it once here (and never per request) is what
+    # amortises the TCP+TLS handshake across lookups.
+    my $ua = $args{ua};
+    if (defined $ua) {
+        croak 'Parameter "ua" must be an object with "get" and "post" methods'
+            unless blessed($ua) && $ua->can('get') && $ua->can('post');
+    }
+    else {
+        $ua = HTTP::Tiny->new(
+            agent           => "Net-IPData-Perl/$VERSION",
+            timeout         => $timeout,
+            keep_alive      => $keep_alive,
+            # Forwarded only when the caller asked for one, so HTTP::Tiny's
+            # own default (no idle limit) applies otherwise; HTTP::Tiny
+            # before 0.092 has no such setting and ignores the key.
+            (defined $keep_alive_timeout
+                ? (keep_alive_timeout => $keep_alive_timeout)
+                : ()),
+            default_headers => {
+                'Accept'       => 'application/json',
+                'Content-Type' => 'application/json',
+            },
+        );
+        # HTTP::Tiny 0.092 and later document keep_alive_timeout as a
+        # constructor attribute, but their constructor (checked up to 0.096)
+        # never copies the argument into the object, so set the attribute
+        # directly where it exists.
+        if (defined $keep_alive_timeout && eval { HTTP::Tiny->VERSION('0.092') }) {
+            $ua->{keep_alive_timeout} = $keep_alive_timeout;
+        }
+    }
 
     return bless {
-        api_key  => $api_key,
-        base_url => $base_url,
-        ua       => $ua,
-        timeout  => $timeout,
+        api_key            => $api_key,
+        base_url           => $base_url,
+        ua                 => $ua,
+        timeout            => $timeout,
+        keep_alive         => $keep_alive,
+        keep_alive_timeout => $keep_alive_timeout,
     }, $class;
 }
 
@@ -168,11 +196,24 @@ sub is_eu {
     return $self->lookup_field($ip, 'is_eu');
 }
 
+sub is_satellite {
+    my ($self, $ip) = @_;
+    return $self->lookup_field($ip, 'is_satellite');
+}
+
+sub is_anycast {
+    my ($self, $ip) = @_;
+    return $self->lookup_field($ip, 'is_anycast');
+}
+
 # --- Accessors ---
 
-sub api_key  { return $_[0]->{api_key} }
-sub base_url { return $_[0]->{base_url} }
-sub timeout  { return $_[0]->{timeout} }
+sub api_key            { return $_[0]->{api_key} }
+sub base_url           { return $_[0]->{base_url} }
+sub timeout            { return $_[0]->{timeout} }
+sub keep_alive         { return $_[0]->{keep_alive} }
+sub keep_alive_timeout { return $_[0]->{keep_alive_timeout} }
+sub ua                 { return $_[0]->{ua} }
 
 # --- Private Methods ---
 
@@ -195,9 +236,29 @@ sub _get {
 sub _post {
     my ($self, $url, $data) = @_;
 
-    my $body = encode_json($data);
+    my $body     = encode_json($data);
     my $response = $self->{ua}->post($url, { content => $body });
+
+    # A kept-alive connection can be closed by the server while idle.
+    # HTTP::Tiny retries idempotent methods on such a socket itself but never
+    # a POST, so retry exactly once when the failure was at the socket level
+    # (status 599) rather than an HTTP status. HTTP::Tiny has already dropped
+    # the dead connection by then, so the retry opens a fresh one.
+    if (_is_stale_connection_error($response)) {
+        $response = $self->{ua}->post($url, { content => $body });
+    }
+
     return $self->_handle_response($response);
+}
+
+# True for the status-599 pseudo-responses HTTP::Tiny returns when a reused
+# socket turned out to be dead; never true for a real HTTP status.
+sub _is_stale_connection_error {
+    my ($response) = @_;
+
+    return 0 unless ($response->{status} // 0) == 599;
+    my $content = $response->{content} // '';
+    return $content =~ /Socket closed|Unexpected end of stream|Connection reset/ ? 1 : 0;
 }
 
 sub _handle_response {
@@ -263,6 +324,10 @@ Net::IPData - Perl client for the ipdata.co IP geolocation and threat intelligen
     printf "IP: %s, Country: %s, City: %s\n",
         $result->{ip}, $result->{country_name}, $result->{city};
 
+    # Flags the API includes only when true (a missing key reads as false)
+    print "satellite ISP\n"    if $result->{is_satellite};
+    print "anycast address\n"  if $result->{is_anycast};
+
     # Look up your own IP address
     my $me = $ipdata->lookup_mine();
 
@@ -294,11 +359,77 @@ has no non-core dependencies.
 =head2 new
 
     my $ipdata = Net::IPData->new(
-        api_key  => 'YOUR_API_KEY',   # required
-        eu       => 0,                # use EU endpoint (default: 0)
-        base_url => '...',            # custom base URL (overrides eu)
-        timeout  => 30,               # HTTP timeout in seconds (default: 30)
+        api_key            => 'YOUR_API_KEY',   # required
+        eu                 => 0,                # use EU endpoint (default: 0)
+        base_url           => '...',            # custom base URL (overrides eu)
+        timeout            => 30,               # HTTP timeout in seconds (default: 30)
+        keep_alive         => 1,                # reuse the HTTPS connection (default: 1)
+        keep_alive_timeout => 60,               # idle timeout in seconds (default: none)
+        ua                 => $user_agent,      # your own HTTP::Tiny-compatible object
     );
+
+=over 4
+
+=item keep_alive
+
+Whether the underlying L<HTTP::Tiny> keeps its connection to the API open
+between requests (default 1). Set it to 0 to open a fresh connection for
+every request. Not applied when C<ua> is supplied.
+
+=item keep_alive_timeout
+
+Idle timeout in seconds for the kept-alive connection: once it has gone
+unused for longer than this, the next request opens a fresh connection
+instead of reusing it. Honoured by L<HTTP::Tiny> 0.092 and later, whose own
+default (no limit) applies when you leave it unset; older HTTP::Tiny has no
+such setting and ignores it, in which case the value is merely stored (see
+L</ACCESSORS>). api.ipdata.co keeps idle connections open for roughly two
+minutes, so 60 is a sensible value. Not applied when C<ua> is supplied.
+
+=item ua
+
+An object to use instead of a new L<HTTP::Tiny>: anything with
+HTTP::Tiny-compatible C<get($url)> and C<post($url, \%options)> methods that
+return a hashref with C<status>, C<content>, C<headers> and C<success>. Use
+it to share one pre-configured HTTP::Tiny (proxy, C<verify_SSL>,
+C<SSL_options>) or to inject a mock in tests. C<timeout>, C<keep_alive> and
+C<keep_alive_timeout> are not applied to a supplied object; configure it
+yourself.
+
+=back
+
+=head1 CONNECTION REUSE
+
+A C<Net::IPData> object keeps one persistent HTTPS connection (HTTP/1.1
+keep-alive) for as long as it lives. Create one client per process (or one
+per API key or endpoint), keep it, and reuse it for every lookup: each new
+client pays a fresh TLS handshake. HTTP/2 is not available with
+L<HTTP::Tiny>, so the saving is the TLS handshake, not multiplexing.
+
+The reuse is HTTP::Tiny's own (C<< keep_alive => 1 >>): the connection is
+reused while the server keeps it open, a connection the server has already
+closed is detected and replaced transparently, and a GET on a socket that
+died silently is retried once by HTTP::Tiny itself. The non-idempotent
+C<POST /bulk> request gets the same single retry from this module, but only
+when the failure happened at the socket level before any response arrived
+(HTTP::Tiny status 599 with a I<Socket closed>, I<Unexpected end of stream>
+or I<Connection reset> error). A request that received an HTTP status is
+never retried. With HTTP::Tiny 0.092 or later, C<< keep_alive_timeout => 60 >>
+additionally stops reusing a connection that has been idle for a minute,
+before the server (which keeps idle connections for roughly two minutes) can
+drop it silently.
+
+A C<Net::IPData> object is not shared between threads: use one object per
+thread. It is fork-safe: HTTP::Tiny 0.049 and later records the process and
+thread that opened the connection and never reuses a socket inherited from
+another process or thread, so a forked child opens its own connection on
+its first request.
+
+There is nothing to close explicitly. The connection is shut down when the
+object is destroyed, so letting it go out of scope (or C<undef $ipdata>) at
+shutdown is all the cleanup needed. Pass C<< keep_alive => 0 >> to open a
+new connection per request, or your own C<ua> to control the transport
+completely.
 
 =head1 METHODS
 
@@ -335,7 +466,9 @@ on the field.
 
 Look up multiple IP addresses in a single request (maximum 100). Sends
 a POST request to the C</bulk> endpoint. Accepts the same C<fields>
-option as C<lookup>.
+option as C<lookup>. If the kept-alive connection turns out to be dead
+before any response arrived, the request is retried once (see
+L</CONNECTION REUSE>).
 
 Returns an arrayref of result hashrefs.
 
@@ -363,6 +496,10 @@ The following methods call C<lookup_field> for common fields:
 
 =item is_eu($ip) - EU membership (boolean)
 
+=item is_satellite($ip) - Satellite internet provider flag (boolean)
+
+=item is_anycast($ip) - Anycast address flag (boolean)
+
 =back
 
 =head1 ACCESSORS
@@ -374,6 +511,12 @@ The following methods call C<lookup_field> for common fields:
 =item base_url - The base URL being used
 
 =item timeout - The HTTP timeout value
+
+=item keep_alive - Whether the HTTPS connection is kept alive between requests (default 1)
+
+=item keep_alive_timeout - The idle timeout given to the constructor, or undef
+
+=item ua - The user agent object (an L<HTTP::Tiny> unless one was injected)
 
 =back
 
@@ -397,7 +540,8 @@ when available.
 
 A full lookup returns a hashref with the following keys:
 
-    ip, is_eu, city, region, region_code, region_type,
+    ip, is_eu, is_satellite, is_anycast,
+    city, region, region_code, region_type,
     country_name, country_code, continent_name, continent_code,
     latitude, longitude, postal, calling_code, flag,
     emoji_flag, emoji_unicode,
@@ -409,8 +553,42 @@ A full lookup returns a hashref with the following keys:
     time_zone => { name, abbr, offset, is_dst, current_time },
     threat   => { is_tor, is_icloud_relay, is_proxy, is_datacenter,
                   is_anonymous, is_known_attacker, is_known_abuser,
-                  is_threat, is_bogon },
+                  is_threat, is_bogon,
+                  blocklists => [{ name, site, type,
+                                   first_seen, last_seen, days_seen }] },
     count    => N  (for bulk lookups)
+
+The JSON is passed through unchanged, so keys the API adds later simply
+appear in the hashref. Five fields deserve a note:
+
+=over 4
+
+=item is_satellite
+
+True when the address belongs to a satellite internet provider. The API
+includes this key only when it is true and omits it otherwise, so test it
+with a plain boolean check (C<< if ($result->{is_satellite}) >>), never
+with C<exists>; a missing key reads as false.
+
+=item is_anycast
+
+True when the address is an anycast address. Present only when true, like
+C<is_satellite>.
+
+=item first_seen, last_seen (per C<< threat->{blocklists} >> entry)
+
+The first and the most recent calendar date (UTC, C<YYYY-MM-DD>) on which
+that blocklist listed the address. The module leaves them as strings.
+
+=item days_seen (per C<< threat->{blocklists} >> entry)
+
+The number of days that blocklist has listed the address (integer).
+
+=back
+
+Some feeds, for example ipdata's own vpn feed, omit all three blocklist
+fields, so check for them with C<exists> before use. Bulk results carry the
+same shape per item.
 
 =head1 REQUIREMENTS
 
@@ -418,7 +596,8 @@ Perl 5.10.1 or later. Only core modules are required:
 
 =over 4
 
-=item * L<HTTP::Tiny> (core since Perl 5.14)
+=item * L<HTTP::Tiny> 0.049 or later (core since Perl 5.14; 0.049 ships
+with Perl 5.22 and later, older Perls install it from CPAN)
 
 =item * L<JSON::PP> (core since Perl 5.14)
 

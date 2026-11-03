@@ -1,5 +1,28 @@
 Revision history for Net-IPData
 
+1.1.0  2026-11-03
+    - Connection reuse: the HTTP::Tiny user agent keeps one HTTPS connection
+      alive across requests (keep_alive => 1, now explicit and configurable);
+      HTTP/2 is not available with HTTP::Tiny, so the saving is the TLS
+      handshake, not multiplexing
+    - New constructor options keep_alive (default 1), keep_alive_timeout
+      (idle timeout in seconds, honoured by HTTP::Tiny 0.092 and later,
+      forwarded only when set) and ua (inject any object with
+      HTTP::Tiny-compatible get/post), with matching accessors
+    - bulk() retries the POST once when a kept-alive connection turns out to
+      be dead before any response arrived (HTTP::Tiny status 599 with Socket
+      closed / Unexpected end of stream / Connection reset); HTTP statuses are
+      never retried
+    - Require HTTP::Tiny 0.049 or later (fork- and thread-safe keep-alive)
+    - CI runs on every push and pull request and installs the declared
+      prerequisites before testing
+    - New API response fields: top-level is_satellite and is_anycast (present
+      only when true; a missing key reads as false) and first_seen, last_seen
+      and days_seen on threat.blocklists entries (optional; dates kept as
+      YYYY-MM-DD strings); the JSON passes through unchanged
+    - is_satellite and is_anycast are accepted in fields => and lookup_field,
+      with is_satellite($ip) and is_anycast($ip) convenience methods
+
 1.0.0  2026-02-23
     - Initial release
     - Full ipdata.co API support: lookup, bulk, field filtering, single field

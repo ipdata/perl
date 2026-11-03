@@ -7,4 +7,8 @@ t/01-constructor.t
 t/02-validation.t
 t/03-mock-responses.t
 t/04-live.t
+t/05-response-fields.t
+t/fixtures/anycast.json
+t/fixtures/satellite.json
+t/fixtures/vpn_blocklists.json
 examples/basic.pl
